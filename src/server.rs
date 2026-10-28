@@ -117,6 +117,9 @@ struct AppState {
     backend: Arc<dyn AgentBackend>,
     sessions: Arc<Sessions>,
     token: Arc<str>,
+    /// `Host` values accepted: this listener's loopback address only, so a
+    /// DNS-rebound name never matches.
+    hosts: Arc<[String]>,
     options: ServeOptions,
 }
 
@@ -142,7 +145,9 @@ pub async fn serve(
     options: ServeOptions,
     shutdown: CancellationToken,
 ) -> io::Result<()> {
-    let state = AppState { backend, sessions: notifier.sessions.clone(), token: token.into(), options };
+    let port = listener.local_addr()?.port();
+    let hosts: Arc<[String]> = vec![format!("127.0.0.1:{port}"), format!("localhost:{port}")].into();
+    let state = AppState { backend, sessions: notifier.sessions.clone(), token: token.into(), hosts, options };
 
     let reaper = {
         let state = state.clone();
@@ -195,6 +200,10 @@ async fn guard(State(state): State<AppState>, headers: HeaderMap, req: Request, 
     // Browsers always send Origin on cross-site requests; the bridge never does.
     if headers.contains_key(header::ORIGIN) {
         return refuse(StatusCode::FORBIDDEN, ErrorKind::Internal, "requests from web pages are not accepted");
+    }
+    let host = headers.get(header::HOST).and_then(|v| v.to_str().ok()).unwrap_or("");
+    if !state.hosts.iter().any(|h| h == host) {
+        return refuse(StatusCode::FORBIDDEN, ErrorKind::Internal, "unexpected Host");
     }
     let presented = headers
         .get(header::AUTHORIZATION)

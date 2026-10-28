@@ -97,6 +97,14 @@ async fn a_web_origin_is_refused_even_with_the_token() {
 }
 
 #[tokio::test]
+async fn a_rebound_host_name_is_refused_even_with_the_token() {
+    let s = Running::start(ServeOptions::default()).await;
+    let r = s.post("/v1/hello").header("Host", "evil.example:80").json(&json!({"client": "x"})).send().await.unwrap();
+    assert_eq!(r.status(), 403);
+    assert!(s.notifier.clients().is_empty());
+}
+
+#[tokio::test]
 async fn an_incompatible_bridge_is_told_to_update() {
     let s = Running::start(ServeOptions::default()).await;
     let r = s.http.post(format!("{}/v1/hello", s.base)).bearer_auth(&s.token).header(PROTOCOL_HEADER, "999").json(&json!({"client": "x"})).send().await.unwrap();

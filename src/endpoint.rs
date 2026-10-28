@@ -38,30 +38,53 @@ pub fn read_endpoint(app_data: &Path) -> io::Result<EndpointInfo> {
 
 /// Write the file atomically and readable by the current user only.
 pub fn write_endpoint(app_data: &Path, info: &EndpointInfo) -> io::Result<()> {
-    let dir = module_dir(app_data);
-    std::fs::create_dir_all(&dir)?;
-    let target = endpoint_file(app_data);
-    let tmp = dir.join(format!(".endpoint.json.{}.tmp", std::process::id()));
-    std::fs::write(&tmp, serde_json::to_vec(info)?)?;
-    restrict_to_user(&tmp)?;
-    std::fs::rename(&tmp, &target)
+    write_private(&endpoint_file(app_data), &serde_json::to_vec(info)?)
 }
 
-pub fn remove_endpoint(app_data: &Path) {
-    let _ = std::fs::remove_file(endpoint_file(app_data));
+/// Atomically write `bytes` to `path`, readable by the current user only from
+/// the moment the file exists (no window where another account could open it),
+/// in a directory only the user can list on Unix.
+pub fn write_private(path: &Path, bytes: &[u8]) -> io::Result<()> {
+    let dir = path.parent().ok_or_else(|| io::Error::new(io::ErrorKind::InvalidInput, "no parent directory"))?;
+    create_private_dir(dir)?;
+    let name = path.file_name().and_then(|n| n.to_str()).unwrap_or("file");
+    let tmp = dir.join(format!(".{name}.{}.tmp", std::process::id()));
+    let _ = std::fs::remove_file(&tmp);
+    {
+        let mut f = open_private(&tmp)?;
+        std::io::Write::write_all(&mut f, bytes)?;
+        f.sync_all()?;
+    }
+    std::fs::rename(&tmp, path)
 }
 
 #[cfg(unix)]
-fn restrict_to_user(path: &Path) -> io::Result<()> {
-    use std::os::unix::fs::PermissionsExt;
-    std::fs::set_permissions(path, std::fs::Permissions::from_mode(0o600))
+fn open_private(path: &Path) -> io::Result<std::fs::File> {
+    use std::os::unix::fs::OpenOptionsExt;
+    std::fs::OpenOptions::new().write(true).create_new(true).mode(0o600).open(path)
 }
 
 // On Windows the file lives under the user's own %APPDATA%, whose ACL already
 // grants access to that user (plus SYSTEM and administrators) only.
 #[cfg(not(unix))]
-fn restrict_to_user(_path: &Path) -> io::Result<()> {
-    Ok(())
+fn open_private(path: &Path) -> io::Result<std::fs::File> {
+    std::fs::OpenOptions::new().write(true).create_new(true).open(path)
+}
+
+#[cfg(unix)]
+fn create_private_dir(dir: &Path) -> io::Result<()> {
+    use std::os::unix::fs::{DirBuilderExt, PermissionsExt};
+    std::fs::DirBuilder::new().recursive(true).mode(0o700).create(dir)?;
+    std::fs::set_permissions(dir, std::fs::Permissions::from_mode(0o700))
+}
+
+#[cfg(not(unix))]
+fn create_private_dir(dir: &Path) -> io::Result<()> {
+    std::fs::create_dir_all(dir)
+}
+
+pub fn remove_endpoint(app_data: &Path) {
+    let _ = std::fs::remove_file(endpoint_file(app_data));
 }
 
 /// 32 random bytes, hex-encoded.
@@ -93,6 +116,8 @@ mod tests {
         write_endpoint(dir.path(), &EndpointInfo { port: 1, token: "t".into(), protocol: 1 }).unwrap();
         let mode = std::fs::metadata(endpoint_file(dir.path())).unwrap().permissions().mode();
         assert_eq!(mode & 0o777, 0o600);
+        let dir_mode = std::fs::metadata(module_dir(dir.path())).unwrap().permissions().mode();
+        assert_eq!(dir_mode & 0o777, 0o700);
     }
 
     #[test]
