@@ -132,7 +132,6 @@ pub enum Panel {
     Inspector,
     Search,
     Statistics,
-    StoryBible,
     Compile,
     Snapshots,
 }
@@ -363,7 +362,7 @@ static CATALOG: LazyLock<Vec<ToolDef>> = LazyLock::new(|| {
         tool::<NoArgs>("list_commands", Read, "Corylus commands you can run with run_command, with what each does and whether it changes content."),
         tool::<ItemArgs>("open_document", View, "Open a document or entry in the editor."),
         tool::<RevealTextArgs>("reveal_text", View, "Open a document and select a passage so the writer sees it."),
-        tool::<ShowPanelArgs>("show_panel", View, "Show or hide a panel: inspector, search, statistics, story_bible, compile, snapshots."),
+        tool::<ShowPanelArgs>("show_panel", View, "Show or hide a panel: inspector, search (show only), statistics, compile, snapshots."),
         tool::<RunCommandArgs>("run_command", View, "Run a Corylus command by id (see list_commands). Commands that change content need edit permission."),
         // ── Changes ──────────────────────────────────────────────────────
         tool::<CreateItemArgs>("create_item", Change, "Create a document (optionally with text) or a folder in the binder."),

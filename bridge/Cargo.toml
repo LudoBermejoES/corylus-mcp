@@ -7,6 +7,10 @@ description = "stdio MCP server that MCP clients launch to reach a running Coryl
 license = "MIT"
 repository = "https://github.com/LudoBermejoES/corylus-mcp"
 
+# Its own workspace root, so it builds the same standalone and when this repo is
+# vendored inside another workspace (Corylus).
+[workspace]
+
 [[bin]]
 name = "corylus-mcp"
 path = "src/main.rs"
