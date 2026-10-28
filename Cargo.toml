@@ -1,0 +1,24 @@
+[package]
+name = "corylus-mcp"
+version = "0.1.0"
+edition = "2024"
+rust-version = "1.88"
+description = "MCP access to Corylus: tool catalog, the loopback agent API Corylus hosts, and its wire types"
+license = "MIT"
+repository = "https://github.com/LudoBermejoES/corylus-mcp"
+
+[dependencies]
+axum = { version = "0.8", default-features = false, features = ["http1", "json", "query", "tokio"] }
+tokio = { version = "1", features = ["rt-multi-thread", "macros", "net", "sync", "time", "fs"] }
+tokio-util = "0.7"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+schemars = "1"
+dirs = "6"
+getrandom = "0.3"
+hex = "0.4"
+tracing = "0.1"
+
+[dev-dependencies]
+reqwest = { version = "0.12", default-features = false, features = ["json"] }
+tempfile = "3"

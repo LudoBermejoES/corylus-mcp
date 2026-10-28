@@ -1,0 +1,26 @@
+[package]
+name = "corylus-mcp-bridge"
+version = "0.1.0"
+edition = "2024"
+rust-version = "1.88"
+description = "stdio MCP server that MCP clients launch to reach a running Corylus"
+license = "MIT"
+repository = "https://github.com/LudoBermejoES/corylus-mcp"
+
+[[bin]]
+name = "corylus-mcp"
+path = "src/main.rs"
+
+[dependencies]
+corylus-mcp = { path = ".." }
+rmcp = { version = "3.8", default-features = false, features = ["server", "transport-io"] }
+reqwest = { version = "0.12", default-features = false, features = ["json"] }
+tokio = { version = "1", features = ["rt-multi-thread", "macros", "sync", "time", "io-std"] }
+serde_json = "1"
+tracing = "0.1"
+
+[dev-dependencies]
+rmcp = { version = "3.8", default-features = false, features = ["server", "client", "transport-io"] }
+tokio-util = "0.7"
+tempfile = "3"
+anyhow = "1"
