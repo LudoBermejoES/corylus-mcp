@@ -86,6 +86,17 @@ impl Bridge {
         }
     }
 
+    /// Remember the client's name for the hello. Claude Code speaks the stateless
+    /// 2026-07-28 protocol: there is no `initialize`, `clientInfo` rides in each
+    /// request's `_meta`. Older clients send it once in `initialize`.
+    fn note_client(&self, info: Option<&Implementation>) {
+        let Some(i) = info else { return };
+        let name = i.title.clone().unwrap_or_else(|| i.name.clone());
+        if !name.trim().is_empty() {
+            *self.inner.client_name.lock().unwrap_or_else(|p| p.into_inner()) = name;
+        }
+    }
+
     fn client_name(&self) -> String {
         self.inner.client_name.lock().unwrap_or_else(|p| p.into_inner()).clone()
     }
@@ -297,18 +308,14 @@ impl ServerHandler for Bridge {
         )
     }
 
-    /// The client's name comes from `clientInfo` here, before any other request
-    /// can open the Corylus session (`initialized` may arrive after `tools/list`).
+    /// Legacy handshake: `initialized` may arrive after `tools/list`, so the name
+    /// is taken here, before any request can open the Corylus session.
     async fn initialize(
         &self,
         request: InitializeRequestParams,
         context: RequestContext<RoleServer>,
     ) -> Result<InitializeResult, McpError> {
-        let i = &request.client_info;
-        let name = i.title.clone().unwrap_or_else(|| i.name.clone());
-        if !name.trim().is_empty() {
-            *self.inner.client_name.lock().unwrap_or_else(|p| p.into_inner()) = name;
-        }
+        self.note_client(Some(&request.client_info));
         context.peer.set_peer_info(request.clone());
         self.negotiate_initialize(&request)
     }
@@ -322,8 +329,9 @@ impl ServerHandler for Bridge {
     async fn list_tools(
         &self,
         _request: Option<PaginatedRequestParams>,
-        _context: RequestContext<RoleServer>,
+        context: RequestContext<RoleServer>,
     ) -> Result<ListToolsResult, McpError> {
+        self.note_client(context.client_info().as_ref());
         self.start_poller();
         let tools = catalog()
             .iter()
@@ -335,8 +343,9 @@ impl ServerHandler for Bridge {
     async fn call_tool(
         &self,
         request: CallToolRequestParams,
-        _context: RequestContext<RoleServer>,
+        context: RequestContext<RoleServer>,
     ) -> Result<CallToolResponse, McpError> {
+        self.note_client(context.client_info().as_ref());
         self.start_poller();
         let args = request.arguments.map(Value::Object).unwrap_or(Value::Null);
         let result = if corylus_mcp::catalog::find(&request.name).is_none() {
@@ -362,8 +371,9 @@ impl ServerHandler for Bridge {
     async fn read_resource(
         &self,
         request: ReadResourceRequestParams,
-        _context: RequestContext<RoleServer>,
+        context: RequestContext<RoleServer>,
     ) -> Result<ReadResourceResponse, McpError> {
+        self.note_client(context.client_info().as_ref());
         let uri = request.uri.as_str();
         let (tool, args) = if uri == "corylus://project" {
             ("corylus_status", json!({}))
@@ -415,6 +425,7 @@ impl ServerHandler for Bridge {
     }
 
     async fn listen(&self, context: SubscriptionContext) -> Result<(), McpError> {
+        self.note_client(context.request_context().client_info().as_ref());
         self.start_poller();
         let sink = context.sink().clone();
         self.inner.subscribers.lock().unwrap_or_else(|p| p.into_inner()).sinks.push(sink.clone());

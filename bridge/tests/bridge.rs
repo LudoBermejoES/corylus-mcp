@@ -266,3 +266,37 @@ async fn a_client_with_no_name_falls_back_to_mcp_client() {
         backend.clients.lock().unwrap()
     );
 }
+
+/// Claude Code's protocol (2026-07-28): no `initialize`; `clientInfo` rides in each request's `_meta`.
+#[tokio::test]
+async fn a_stateless_client_is_named_from_the_request_meta() {
+    use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
+    let dir = tempfile::tempdir().unwrap();
+    let corylus = Corylus::start(dir.path()).await;
+    let (server_io, client_io) = tokio::io::duplex(64 * 1024);
+    let bridge = Bridge::new(dir.path().into());
+    tokio::spawn(async move {
+        if let Ok(running) = bridge.serve(server_io).await {
+            let _ = running.waiting().await;
+        }
+    });
+    let (rd, mut wr) = tokio::io::split(client_io);
+    let mut rd = BufReader::new(rd);
+    let meta = json!({
+        "io.modelcontextprotocol/protocolVersion": "2026-07-28",
+        "io.modelcontextprotocol/clientInfo": {"name": "claude-code", "title": "Claude Code", "version": "2.1"},
+        "io.modelcontextprotocol/clientCapabilities": {}
+    });
+    let list = json!({"jsonrpc": "2.0", "id": 1, "method": "tools/list", "params": {"_meta": meta}});
+    wr.write_all(format!("{list}\n").as_bytes()).await.unwrap();
+    let mut line = String::new();
+    rd.read_line(&mut line).await.unwrap();
+    assert!(line.contains("read_document"), "{line}");
+    let backend = corylus.backend.clone();
+    assert!(
+        eventually(|| backend.clients.lock().unwrap().as_slice() == ["Claude Code"]).await,
+        "registered as {:?}",
+        backend.clients.lock().unwrap()
+    );
+    std::mem::forget((rd, wr));
+}
