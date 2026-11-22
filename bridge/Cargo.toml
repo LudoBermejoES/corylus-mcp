@@ -1,6 +1,6 @@
 [package]
 name = "corylus-mcp-bridge"
-version = "0.1.0"
+version = "0.1.1"
 edition = "2024"
 rust-version = "1.88"
 description = "stdio MCP server that MCP clients launch to reach a running Corylus"
@@ -25,6 +25,7 @@ tracing = "0.1"
 
 [dev-dependencies]
 rmcp = { version = "3.8", default-features = false, features = ["server", "client", "transport-io"] }
+tokio = { version = "1", features = ["io-util"] }
 tokio-util = "0.7"
 tempfile = "3"
 anyhow = "1"

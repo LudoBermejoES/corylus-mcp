@@ -16,8 +16,8 @@ use corylus_mcp::wire::{
 };
 use corylus_mcp::{AgentError, ErrorKind, PROTOCOL_VERSION};
 use rmcp::model::{
-    CallToolRequestParams, CallToolResponse, CallToolResult, ContentBlock, Implementation, ListResourcesResult,
-    ListToolsResult, PaginatedRequestParams, ReadResourceRequestParams, ReadResourceResponse,
+    CallToolRequestParams, CallToolResponse, CallToolResult, ContentBlock, Implementation, InitializeRequestParams,
+    InitializeResult, ListResourcesResult, ListToolsResult, PaginatedRequestParams, ReadResourceRequestParams, ReadResourceResponse,
     ReadResourceResult, Resource, ResourceContents, ServerCapabilities, ServerConfig, SubscribeRequestParams,
     SubscriptionFilter, Tool, UnsubscribeRequestParams,
 };
@@ -297,12 +297,23 @@ impl ServerHandler for Bridge {
         )
     }
 
-    async fn on_initialized(&self, context: NotificationContext<RoleServer>) {
-        if let Some(info) = context.peer.peer_info() {
-            let i = &info.client_info;
-            *self.inner.client_name.lock().unwrap_or_else(|p| p.into_inner()) =
-                i.title.clone().unwrap_or_else(|| i.name.clone());
+    /// The client's name comes from `clientInfo` here, before any other request
+    /// can open the Corylus session (`initialized` may arrive after `tools/list`).
+    async fn initialize(
+        &self,
+        request: InitializeRequestParams,
+        context: RequestContext<RoleServer>,
+    ) -> Result<InitializeResult, McpError> {
+        let i = &request.client_info;
+        let name = i.title.clone().unwrap_or_else(|| i.name.clone());
+        if !name.trim().is_empty() {
+            *self.inner.client_name.lock().unwrap_or_else(|p| p.into_inner()) = name;
         }
+        context.peer.set_peer_info(request.clone());
+        self.negotiate_initialize(&request)
+    }
+
+    async fn on_initialized(&self, context: NotificationContext<RoleServer>) {
         self.inner.subscribers.lock().unwrap_or_else(|p| p.into_inner()).legacy =
             Some((context.peer.clone(), HashSet::new()));
         self.start_poller();

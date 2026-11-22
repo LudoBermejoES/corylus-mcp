@@ -210,3 +210,59 @@ async fn a_change_in_corylus_reaches_a_subscribed_client() {
         other => panic!("unexpected notification {other:?}"),
     }
 }
+
+/// Drive the bridge by hand: `tools/list` goes out before `notifications/initialized`.
+async fn list_tools_before_initialized(app_data: &Path, init_params: Value) {
+    use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
+    let (server_io, client_io) = tokio::io::duplex(64 * 1024);
+    let bridge = Bridge::new(app_data.into());
+    tokio::spawn(async move {
+        if let Ok(running) = bridge.serve(server_io).await {
+            let _ = running.waiting().await;
+        }
+    });
+    let (rd, mut wr) = tokio::io::split(client_io);
+    let mut rd = BufReader::new(rd);
+    let init = json!({"jsonrpc": "2.0", "id": 1, "method": "initialize", "params": init_params});
+    wr.write_all(format!("{init}\n").as_bytes()).await.unwrap();
+    let mut line = String::new();
+    rd.read_line(&mut line).await.unwrap();
+    assert!(line.contains("\"result\""), "{line}");
+    let list = json!({"jsonrpc": "2.0", "id": 2, "method": "tools/list"});
+    wr.write_all(format!("{list}\n").as_bytes()).await.unwrap();
+    line.clear();
+    rd.read_line(&mut line).await.unwrap();
+    assert!(line.contains("read_document"), "{line}");
+    // Keep the pipe open until the caller has looked; the bridge dies with the test.
+    std::mem::forget((rd, wr));
+}
+
+fn init_params(client_info: Value) -> Value {
+    json!({"protocolVersion": "2025-06-18", "capabilities": {}, "clientInfo": client_info})
+}
+
+#[tokio::test]
+async fn a_client_whose_tools_list_beats_initialized_still_registers_by_name() {
+    let dir = tempfile::tempdir().unwrap();
+    let corylus = Corylus::start(dir.path()).await;
+    list_tools_before_initialized(dir.path(), init_params(json!({"name": "claude-code", "version": "2.1"}))).await;
+    let backend = corylus.backend.clone();
+    assert!(
+        eventually(|| backend.clients.lock().unwrap().as_slice() == ["claude-code"]).await,
+        "registered as {:?}",
+        backend.clients.lock().unwrap()
+    );
+}
+
+#[tokio::test]
+async fn a_client_with_no_name_falls_back_to_mcp_client() {
+    let dir = tempfile::tempdir().unwrap();
+    let corylus = Corylus::start(dir.path()).await;
+    list_tools_before_initialized(dir.path(), init_params(json!({"name": "", "version": "1"}))).await;
+    let backend = corylus.backend.clone();
+    assert!(
+        eventually(|| backend.clients.lock().unwrap().as_slice() == ["MCP client"]).await,
+        "registered as {:?}",
+        backend.clients.lock().unwrap()
+    );
+}
