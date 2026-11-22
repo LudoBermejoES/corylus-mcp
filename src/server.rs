@@ -249,6 +249,24 @@ async fn call(State(state): State<AppState>, Json(req): Json<CallRequest>) -> Re
     Json(body).into_response()
 }
 
+/// Drops the session if the long poll is abandoned before it answers. The
+/// bridge always keeps one poll open, so this fires as soon as its connection
+/// closes (the client killed the bridge without a bye) instead of after the
+/// idle timeout.
+struct PollGuard {
+    state: AppState,
+    session: String,
+    armed: bool,
+}
+
+impl Drop for PollGuard {
+    fn drop(&mut self) {
+        if self.armed && self.state.sessions.lock().remove(&self.session).is_some() {
+            self.state.changed();
+        }
+    }
+}
+
 async fn events(State(state): State<AppState>, Query(req): Query<SessionRequest>) -> Response {
     let wake = {
         let mut map = state.sessions.lock();
@@ -259,7 +277,9 @@ async fn events(State(state): State<AppState>, Query(req): Query<SessionRequest>
         }
         s.wake.clone()
     };
+    let mut guard = PollGuard { state: state.clone(), session: req.session.clone(), armed: true };
     let _ = tokio::time::timeout(state.options.poll_wait, wake.notified()).await;
+    guard.armed = false;
     let mut map = state.sessions.lock();
     let Some(s) = map.get_mut(&req.session) else { return unknown_session() };
     s.last_seen = Instant::now();

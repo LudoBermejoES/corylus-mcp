@@ -199,3 +199,32 @@ async fn clients_appear_and_leave_on_bye_and_on_idle_timeout() {
     let last = s.backend.clients.lock().unwrap().last().cloned().unwrap();
     assert!(last.is_empty());
 }
+
+#[tokio::test]
+async fn a_client_that_vanishes_mid_poll_leaves_at_once() {
+    use tokio::io::AsyncWriteExt;
+    // Idle timeout far beyond the test, so only the closed connection can drop it.
+    let s = Running::start(ServeOptions { idle_timeout: Duration::from_secs(60), poll_wait: Duration::from_secs(30) }).await;
+    let session = s.hello("claude-code").await;
+    let _other = s.hello("claude-ai").await;
+
+    // A long poll on a raw socket, then the process "dies": the socket closes with no bye.
+    let addr = s.base.trim_start_matches("http://").to_string();
+    let mut sock = tokio::net::TcpStream::connect(&addr).await.unwrap();
+    let req = format!(
+        "GET /v1/events?session={session} HTTP/1.1\r\nHost: {addr}\r\nAuthorization: Bearer {}\r\n{PROTOCOL_HEADER}: {PROTOCOL_VERSION}\r\n\r\n",
+        s.token
+    );
+    sock.write_all(req.as_bytes()).await.unwrap();
+    tokio::time::sleep(Duration::from_millis(200)).await;
+    assert_eq!(s.notifier.clients().len(), 2);
+    drop(sock);
+
+    let started = Instant::now();
+    while s.notifier.clients().len() != 1 && started.elapsed() < Duration::from_secs(3) {
+        tokio::time::sleep(Duration::from_millis(20)).await;
+    }
+    let names: Vec<_> = s.notifier.clients().into_iter().map(|c| c.name).collect();
+    assert_eq!(names, ["claude-ai"], "a dead client stayed connected");
+    assert_eq!(s.backend.clients.lock().unwrap().last().unwrap().len(), 1);
+}
